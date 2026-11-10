@@ -1,0 +1,42 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_AGENT_ENABLED: "true"   # necessário para o CDC (sistema B)
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Str0ng!Passw0rd}
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # Cria a base de dados e a tabela. NÃO activa o CDC (ver README: o CDC só
+  # deve estar activo nas medições do sistema B).
+  sql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./sql:/sql:ro
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Str0ng!Passw0rd}
+    entrypoint: ["/bin/bash", "-c", "/opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P \"$$MSSQL_SA_PASSWORD\" -i /sql/01_schema.sql"]
+
+  # Destino do painel (sistema A e, mais tarde, sistema B). Postgres: o mesmo motor do Supabase.
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-Str0ng!Passw0rd}
+      POSTGRES_DB: destino
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d destino"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
